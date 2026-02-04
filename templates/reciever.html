@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EOT | Operational Receiving Center</title>
+<style>
+:root {
+    --bg-main: #f8f9fa;
+    --sidebar-bg: #ffffff;
+    --primary: #2563eb;
+    --primary-dark: #1e40af;
+    --text-main: #1e293b;
+    --text-muted: #64748b;
+    --border: #e2e8f0;
+    --hazard-red: #ef4444;
+    --warning-orange: #f59e0b;
+    --success-green: #10b981;
+    --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
+
+body {
+    margin: 0;
+    font-family: 'Inter', -apple-system, sans-serif;
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    display: grid;
+    grid-template-columns: 260px 1fr 340px;
+    height: 100vh;
+    overflow: hidden;
+}
+
+nav {
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--border);
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.brand-container { padding-bottom: 32px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+.brand-name { font-weight: 800; font-size: 1.25rem; color: var(--primary); letter-spacing: -0.025em; }
+.nav-link { padding: 10px 12px; border-radius: 6px; font-size: 0.875rem; font-weight: 500; color: var(--text-muted); cursor: pointer; transition: all 0.2s; }
+.nav-link:hover { background: #f1f5f9; color: var(--text-main); }
+.nav-link.active { background: #eff6ff; color: var(--primary); }
+
+main { padding: 32px; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; }
+.section-title { font-size: 1.125rem; font-weight: 600; }
+.data-card { background: white; border: 1px solid var(--border); border-radius: 8px; padding: 20px; box-shadow: var(--shadow); }
+table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+th { text-align: left; padding: 12px; color: var(--text-muted); font-weight: 600; border-bottom: 1px solid var(--border); }
+td { padding: 16px 12px; border-bottom: 1px solid var(--border); }
+.status-pill { padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
+.status-red { background: #fee2e2; color: #b91c1c; }
+.status-orange { background: #ffedd5; color: #9a3412; }
+.status-green { background: #dcfce7; color: #15803d; }
+
+aside { background: var(--sidebar-bg); border-left: 1px solid var(--border); padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+.risk-overview { text-align: center; padding: 24px; background: #f8fafc; border-radius: 12px; border: 1px solid var(--border); }
+.risk-score { font-size: 3rem; font-weight: 800; color: var(--hazard-red); line-height: 1; margin: 8px 0; }
+
+.btn { width: 100%; padding: 12px; border-radius: 6px; font-size: 0.875rem; font-weight: 600; cursor: pointer; transition: 0.2s; border: none; }
+.btn-primary { background: var(--primary); color: white; }
+.btn-primary:hover { background: var(--primary-dark); }
+.btn-outline { background: white; border: 1px solid var(--border); color: var(--text-main); margin-top: 8px; }
+.btn-outline:hover { background: #f8fafc; }
+
+.log-item { padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 0.75rem; }
+.log-meta { color: var(--text-muted); margin-bottom: 4px; display: block; }
+</style>
+</head>
+<body>
+<nav>
+    <div class="brand-container">
+        <div class="brand-name">EOT PLATFORM</div>
+        <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;">OPERATIONAL INTELLIGENCE</div>
+    </div>
+    <div class="nav-link active">Intelligence Dashboard</div>
+    <div class="nav-link">Incoming Field Data</div>
+    <div class="nav-link">Hotspot Analytics</div>
+    <div class="nav-link">LGU Reporting Hub</div>
+    <div class="nav-link">Audit & Compliance</div>
+    <div class="nav-link" style="margin-top: auto;">System Settings</div>
+</nav>
+
+<main>
+    <div class="section-header">
+        <h2 class="section-title">Live Ingestion Queue</h2>
+        <span style="font-size: 0.75rem; color: var(--text-muted);">Uplink: Active | Sync Latency: 12ms</span>
+    </div>
+
+    <div class="data-card">
+        <table>
+            <thead>
+                <tr>
+                    <th>Source ID</th>
+                    <th>Timestamp</th>
+                    <th>Barangay</th>
+                    <th>Egg Count</th>
+                    <th>Risk Status</th>
+                    <th>Integrity</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- JS will populate this -->
+            </tbody>
+        </table>
+    </div>
+</main>
+
+<aside>
+    <div class="section-title">Risk Intelligence</div>
+    <div class="risk-overview">
+        <span style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Computed Risk Index</span>
+        <div class="risk-score">0.88</div>
+        <span style="font-size: 0.75rem; color: var(--hazard-red); font-weight: 700;">THRESHOLD EXCEEDED</span>
+    </div>
+    <div>
+        <button class="btn btn-primary" onclick="triggerEscal
