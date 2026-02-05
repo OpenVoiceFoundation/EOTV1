@@ -84,31 +84,7 @@ aside { background: var(--sidebar-bg); border-left: 1px solid var(--border); pad
     <div class="nav-link" style="margin-top: auto;">System Settings</div>
 </nav>
 
-<main>
-    <div class="section-header">
-        <h2 class="section-title">Live Ingestion Queue</h2>
-        <span style="font-size: 0.75rem; color: var(--text-muted);">Uplink: Active | Sync Latency: 12ms</span>
-    </div>
-
-    <div class="data-card">
-        <table>
-            <thead>
-                <tr>
-                    <th>Source ID</th>
-                    <th>Timestamp</th>
-                    <th>GPS</th>
-                    <th>Barangay</th>
-                    <th>Egg Count</th>
-                    <th>Risk Status</th>
-                    <th>Integrity</th>
-                </tr>
-            </thead>
-            <tbody>
-                <!-- JS will populate this -->
-            </tbody>
-        </table>
-    </div>
-</main>
+<main id="main-content"></main>
 
 <aside>
     <div class="section-title">Risk Intelligence</div>
@@ -123,13 +99,33 @@ aside { background: var(--sidebar-bg); border-left: 1px solid var(--border); pad
 </aside>
 
 <script>
-// --- LIVE DATA TABLE ---
+let refreshInterval = null;
+
+function stopAutoRefresh(){
+    if(refreshInterval){
+        clearInterval(refreshInterval);
+        refreshInterval = null;
+    }
+}
+
+function startAutoRefresh(fn, ms=5000){
+    stopAutoRefresh();
+    fn();
+    refreshInterval = setInterval(fn, ms);
+}
+
+// ----------------------------
+// TABLE LOADER
+// ----------------------------
 async function loadQueue(tbodySelector="table tbody") {
     try {
         const res = await fetch("/api/ingestion");
+        if(!res.ok) throw new Error("Failed to fetch ingestion");
+
         const data = await res.json();
         const tbody = document.querySelector(tbodySelector);
         if(!tbody) return;
+
         tbody.innerHTML = "";
 
         data.forEach(entry => {
@@ -141,38 +137,40 @@ async function loadQueue(tbodySelector="table tbody") {
                 <td>${entry.trap_id}</td>
                 <td>${entry.timestamp}</td>
                 <td>${entry.gps}</td>
-                <td>${entry.barangay}</td>
                 <td>${entry.egg_count}</td>
                 <td><span class="status-pill ${riskClass}">${riskText}</span></td>
                 <td><span class="status-pill ${entry.sha256_valid ? 'status-green' : 'status-red'}">${entry.sha256_valid ? 'Valid' : 'Invalid'}</span></td>
             `;
             tbody.appendChild(row);
         });
+
     } catch (err) {
         console.error("Failed to load queue:", err);
     }
 }
 
-// --- HOTSPOT LIST ---
+// ----------------------------
+// HOTSPOT LIST (GROUP BY GPS)
+// ----------------------------
 async function loadHotspotList(containerSelector) {
     try {
         const res = await fetch("/api/ingestion");
+        if(!res.ok) throw new Error("Failed to fetch ingestion");
+
         const data = await res.json();
 
-        // Aggregate by barangay for risk (egg_count sum)
         const riskMap = {};
         data.forEach(d => {
-            if(!riskMap[d.barangay]) riskMap[d.barangay] = 0;
-            riskMap[d.barangay] += d.egg_count;
+            if(!riskMap[d.gps]) riskMap[d.gps] = 0;
+            riskMap[d.gps] += d.egg_count;
         });
 
-        const sortedBarangays = Object.entries(riskMap)
-            .sort((a,b) => b[1] - a[1]);
+        const sorted = Object.entries(riskMap).sort((a,b) => b[1] - a[1]);
 
         const container = document.querySelector(containerSelector);
         container.innerHTML = "";
 
-        if(sortedBarangays.length === 0){
+        if(sorted.length === 0){
             container.innerHTML = "<p style='color:var(--text-muted)'>No hotspot data available.</p>";
             return;
         }
@@ -181,98 +179,121 @@ async function loadHotspotList(containerSelector) {
         ul.style.listStyle = "none";
         ul.style.padding = "0";
         ul.style.margin = "0";
-        sortedBarangays.forEach(([barangay, totalEggs]) => {
+
+        sorted.forEach(([gps, totalEggs]) => {
             const li = document.createElement("li");
             li.style.padding = "8px 0";
-            li.innerHTML = `<strong>${barangay}</strong>: ${totalEggs} eggs`;
+            li.innerHTML = `<strong>${gps}</strong>: ${totalEggs} eggs`;
             ul.appendChild(li);
         });
+
         container.appendChild(ul);
+
     } catch(e) {
         console.error("Failed to load hotspots:", e);
     }
 }
 
-// --- SIDEBAR NAVIGATION ---
+// ----------------------------
+// PAGE RENDERERS
+// ----------------------------
+function renderDashboard(){
+    const main = document.getElementById("main-content");
+
+    main.innerHTML = `
+        <div class="section-header">
+            <h2 class="section-title">Live Ingestion Queue</h2>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">Uplink: Active | Sync Latency: 12ms</span>
+        </div>
+
+        <div class="data-card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Source ID</th>
+                        <th>Timestamp</th>
+                        <th>GPS</th>
+                        <th>Egg Count</th>
+                        <th>Risk Status</th>
+                        <th>Integrity</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    `;
+
+    startAutoRefresh(() => loadQueue("#main-content table tbody"), 5000);
+}
+
+function renderIncomingFieldData(){
+    const main = document.getElementById("main-content");
+
+    main.innerHTML = `
+        <div class="section-header">
+            <h2 class="section-title">Incoming Field Data</h2>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">Data from field traps</span>
+        </div>
+
+        <div class="data-card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Trap ID</th>
+                        <th>Timestamp</th>
+                        <th>GPS</th>
+                        <th>Egg Count</th>
+                        <th>Risk Status</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    `;
+
+    startAutoRefresh(() => loadQueue("#main-content table tbody"), 5000);
+}
+
+function renderHotspotAnalytics(){
+    const main = document.getElementById("main-content");
+
+    main.innerHTML = `
+        <div class="section-header">
+            <h2 class="section-title">Hotspot Analytics</h2>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">High-risk areas overview</span>
+        </div>
+
+        <div class="data-card" id="hotspot-container" style="padding:20px;">
+            <p style="font-size:0.9rem; color:var(--text-muted);">Loading hotspot data...</p>
+        </div>
+    `;
+
+    stopAutoRefresh();
+    loadHotspotList("#hotspot-container");
+}
+
+// ----------------------------
+// NAVIGATION
+// ----------------------------
 const navLinks = document.querySelectorAll("nav .nav-link");
-const main = document.querySelector("main");
 
 navLinks.forEach(link => {
     link.addEventListener("click", () => {
         navLinks.forEach(l => l.classList.remove("active"));
         link.classList.add("active");
+
         const text = link.textContent.trim();
 
-        if(text === "Intelligence Dashboard") {
-            main.innerHTML = `
-                <div class="section-header">
-                    <h2 class="section-title">Live Ingestion Queue</h2>
-                    <span style="font-size: 0.75rem; color: var(--text-muted);">Uplink: Active | Sync Latency: 12ms</span>
-                </div>
-                <div class="data-card">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Source ID</th>
-                                <th>Timestamp</th>
-                                <th>GPS</th>
-                                <th>Barangay</th>
-                                <th>Egg Count</th>
-                                <th>Risk Status</th>
-                                <th>Integrity</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
-                </div>
-            `;
-            loadQueue();
-            setInterval(() => loadQueue(), 5000);
-        }
-
-        if(text === "Incoming Field Data") {
-            main.innerHTML = `
-                <div class="section-header">
-                    <h2 class="section-title">Incoming Field Data</h2>
-                    <span style="font-size: 0.75rem; color: var(--text-muted);">Data from field traps</span>
-                </div>
-                <div class="data-card">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Trap ID</th>
-                                <th>Timestamp</th>
-                                <th>GPS</th>
-                                <th>Barangay</th>
-                                <th>Egg Count</th>
-                                <th>Risk Status</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
-                </div>
-            `;
-            loadQueue("main .data-card tbody");
-        }
-
-        if(text === "Hotspot Analytics") {
-            main.innerHTML = `
-                <div class="section-header">
-                    <h2 class="section-title">Hotspot Analytics</h2>
-                    <span style="font-size: 0.75rem; color: var(--text-muted);">High-risk areas overview</span>
-                </div>
-                <div class="data-card" id="hotspot-container" style="padding:20px;">
-                    <p style="font-size:0.9rem; color:var(--text-muted);">Loading hotspot data...</p>
-                </div>
-            `;
-            loadHotspotList("#hotspot-container");
-        }
+        if(text === "Intelligence Dashboard") renderDashboard();
+        if(text === "Incoming Field Data") renderIncomingFieldData();
+        if(text === "Hotspot Analytics") renderHotspotAnalytics();
     });
 });
 
-// --- INITIAL LOAD ---
-loadQueue();
-setInterval(loadQueue, 5000);
+// ----------------------------
+// INITIAL LOAD
+// ----------------------------
+renderDashboard();
 </script>
 
 </body>
