@@ -121,7 +121,7 @@ aside { background: var(--sidebar-bg); border-left: 1px solid var(--border); pad
     </div>
 </aside>
 
-<!-- LIVE TABLE JS -->
+<!-- LIVE TABLE + SECTIONS JS -->
 <script>
 async function loadQueue() {
     try {
@@ -132,8 +132,6 @@ async function loadQueue() {
 
         data.forEach(entry => {
             const row = document.createElement("tr");
-
-            // Risk status logic
             let riskClass = entry.egg_count > 10 ? "status-red" : "status-green";
             let riskText = entry.egg_count > 10 ? "High" : "Normal";
 
@@ -152,7 +150,69 @@ async function loadQueue() {
     }
 }
 
-// Initial load and auto-refresh every 5 seconds
+// Incoming Field Data section
+async function loadFieldData() {
+    try {
+        const res = await fetch("/api/ingestion");
+        const data = await res.json();
+        const main = document.querySelector("main");
+        main.innerHTML = `<h2 class="section-title">Incoming Field Data</h2>`;
+        data.forEach(entry => {
+            const div = document.createElement("div");
+            div.classList.add("data-card");
+            div.innerHTML = `
+                <strong>${entry.trap_id}</strong> | ${entry.timestamp} | ${entry.barangay} | ${entry.trap_type} | Eggs: ${entry.egg_count} | Integrity: ${entry.sha256_valid ? 'Valid' : 'Invalid'}
+            `;
+            main.appendChild(div);
+        });
+    } catch (err) {
+        console.error("Failed to load field data:", err);
+    }
+}
+
+// Hotspot Analytics section (mock example)
+async function loadHotspots() {
+    try {
+        // Replace with real API endpoint if available
+        const res = await fetch("/api/ingestion");
+        const data = await res.json();
+        const main = document.querySelector("main");
+        main.innerHTML = `<h2 class="section-title">Hotspot Analytics</h2>`;
+        const hotspotMap = {};
+
+        data.forEach(entry => {
+            if (!hotspotMap[entry.barangay]) hotspotMap[entry.barangay] = 0;
+            hotspotMap[entry.barangay] += entry.egg_count;
+        });
+
+        Object.keys(hotspotMap).forEach(barangay => {
+            const div = document.createElement("div");
+            div.classList.add("data-card");
+            div.innerHTML = `${barangay}: Total Eggs: ${hotspotMap[barangay]} | Risk: ${hotspotMap[barangay] > 10 ? 'High' : 'Normal'}`;
+            main.appendChild(div);
+        });
+    } catch (err) {
+        console.error("Failed to load hotspots:", err);
+    }
+}
+
+// NAV LINK HANDLER
+const sections = {
+    "Intelligence Dashboard": loadQueue,
+    "Incoming Field Data": loadFieldData,
+    "Hotspot Analytics": loadHotspots
+};
+
+document.querySelectorAll("nav .nav-link").forEach(link => {
+    link.addEventListener("click", () => {
+        document.querySelectorAll("nav .nav-link").forEach(l => l.classList.remove("active"));
+        link.classList.add("active");
+        const section = link.textContent.trim();
+        if (sections[section]) sections[section]();
+    });
+});
+
+// Initial load
 loadQueue();
 setInterval(loadQueue, 5000);
 </script>
