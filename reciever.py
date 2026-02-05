@@ -1,84 +1,140 @@
 from flask import Flask, request, jsonify, render_template
-import csv, os, hashlib, hmac
+import sqlite3
+import hashlib
+import hmac
 from datetime import datetime
+import os
 
 app = Flask(__name__)
-CSV_FILE = "receiver_data.csv"
 
-# --- Shared secret key (must match scanner) ---
-SECRET_KEY = b"eot2026et67567"  # <-- Change this if you want
+DB_FILE = "receiver_data.db"
+SECRET_KEY = b"eot2026et67567"
 
-# --- Ensure CSV exists ---
-if not os.path.exists(CSV_FILE):
-    with open(CSV_FILE, "w", newline="") as f:
-        csv.writer(f).writerow(
-            [
-                "timestamp",
-                "trap_id",
-                "trap_type",
-                "gps",
-                "egg_count",
-                "barangay",
-                "sha256_valid",
-            ]
+
+# -----------------------------
+# DATABASE INIT
+# -----------------------------
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS ingestion (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            trap_id TEXT NOT NULL,
+            trap_type TEXT NOT NULL,
+            gps TEXT NOT NULL,
+            egg_count INTEGER NOT NULL,
+            barangay TEXT,
+            sha256_valid INTEGER NOT NULL
         )
+    """)
+
+    conn.commit()
+    conn.close()
 
 
-# --- Serve Dashboard ---
+init_db()
+
+
+# -----------------------------
+# FRONTEND
+# -----------------------------
 @app.route("/")
 def index():
     return render_template("receiver.html")
 
 
-# --- Scanner Submission Endpoint ---
+# -----------------------------
+# SUBMISSION ENDPOINT
+# -----------------------------
 @app.route("/api/submit", methods=["POST"])
 def submit_data():
     try:
-        data = request.json
-        trap_id = data.get("trap_id")
-        trap_type = data.get("trap_type")
-        gps = data.get("gps")
+        data = request.get_json(force=True)
+
+        trap_id = data.get("trap_id", "").strip()
+        trap_type = data.get("trap_type", "").strip()
+        gps = data.get("gps", "").strip()  # expects "lat,long"
         egg_count = int(data.get("egg_count", 0))
-        barangay = data.get("barangay", "")
+        barangay = data.get("barangay", "").strip()
+        client_hash = data.get("sha256", "").strip()
 
-        # --- Compute HMAC-SHA256 for verification ---
+        if not trap_id or not trap_type or not gps:
+            return jsonify({"success": False, "error": "trap_id, trap_type, and gps are required"}), 400
+
+        # HMAC validation
         payload_str = f"{trap_id}{trap_type}{gps}{egg_count}".encode()
-        sha256_hash = hmac.new(SECRET_KEY, payload_str, hashlib.sha256).hexdigest()
-        valid = sha256_hash == data.get("sha256")
+        server_hash = hmac.new(SECRET_KEY, payload_str, hashlib.sha256).hexdigest()
+        valid = (server_hash == client_hash)
 
-        # --- Save to CSV ---
-        with open(CSV_FILE, "a", newline="") as f:
-            csv.writer(f).writerow(
-                [datetime.utcnow(), trap_id, trap_type, gps, egg_count, barangay, valid]
-            )
+        # Insert into DB
+        conn = sqlite3.connect(DB_FILE)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO ingestion (timestamp, trap_id, trap_type, gps, egg_count, barangay, sha256_valid)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            datetime.utcnow().isoformat(),
+            trap_id,
+            trap_type,
+            gps,
+            egg_count,
+            barangay,
+            1 if valid else 0
+        ))
+        conn.commit()
+        conn.close()
 
         return jsonify({"success": True, "sha256_valid": valid})
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"success": False, "error": str(e)}), 400
 
 
-# --- Provide Dashboard Data ---
+# -----------------------------
+# FETCH DATA FOR DASHBOARD
+# -----------------------------
 @app.route("/api/ingestion")
 def get_ingestion_data():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT timestamp, trap_id, trap_type, gps, egg_count, barangay, sha256_valid
+        FROM ingestion
+        ORDER BY id DESC
+        LIMIT 200
+    """)
+
+    rows = cur.fetchall()
+    conn.close()
+
     entries = []
-    if os.path.exists(CSV_FILE):
-        with open(CSV_FILE, newline="") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                entries.append(
-                    {
-                        "timestamp": row["timestamp"],
-                        "trap_id": row["trap_id"],
-                        "trap_type": row["trap_type"],
-                        "gps": row["gps"],
-                        "egg_count": int(row["egg_count"]),
-                        "barangay": row.get("barangay", ""),
-                        "sha256_valid": row["sha256_valid"] == "True",
-                    }
-                )
+    for r in rows:
+        entries.append({
+            "timestamp": r["timestamp"],
+            "trap_id": r["trap_id"],
+            "trap_type": r["trap_type"],
+            "gps": r["gps"],
+            "egg_count": r["egg_count"],
+            "barangay": r["barangay"] or "",
+            "sha256_valid": bool(r["sha256_valid"]),
+        })
+
     return jsonify(entries)
 
 
+# -----------------------------
+# HEALTH CHECK
+# -----------------------------
+@app.route("/api/health")
+def health():
+    return jsonify({"status": "ok"})
+
+
 if __name__ == "__main__":
+    # debug=False for production
     app.run(host="0.0.0.0", port=5000, debug=True)
