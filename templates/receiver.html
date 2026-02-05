@@ -96,6 +96,7 @@ aside { background: var(--sidebar-bg); border-left: 1px solid var(--border); pad
                 <tr>
                     <th>Source ID</th>
                     <th>Timestamp</th>
+                    <th>GPS</th>
                     <th>Barangay</th>
                     <th>Egg Count</th>
                     <th>Risk Status</th>
@@ -139,6 +140,7 @@ async function loadQueue(tbodySelector="table tbody") {
             row.innerHTML = `
                 <td>${entry.trap_id}</td>
                 <td>${entry.timestamp}</td>
+                <td>${entry.gps}</td>
                 <td>${entry.barangay}</td>
                 <td>${entry.egg_count}</td>
                 <td><span class="status-pill ${riskClass}">${riskText}</span></td>
@@ -213,6 +215,7 @@ navLinks.forEach(link => {
                             <tr>
                                 <th>Source ID</th>
                                 <th>Timestamp</th>
+                                <th>GPS</th>
                                 <th>Barangay</th>
                                 <th>Egg Count</th>
                                 <th>Risk Status</th>
@@ -239,6 +242,7 @@ navLinks.forEach(link => {
                             <tr>
                                 <th>Trap ID</th>
                                 <th>Timestamp</th>
+                                <th>GPS</th>
                                 <th>Barangay</th>
                                 <th>Egg Count</th>
                                 <th>Risk Status</th>
