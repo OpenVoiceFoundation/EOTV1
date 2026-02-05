@@ -121,13 +121,14 @@ aside { background: var(--sidebar-bg); border-left: 1px solid var(--border); pad
     </div>
 </aside>
 
-<!-- LIVE TABLE + SECTIONS JS -->
 <script>
-async function loadQueue() {
+// --- LIVE DATA TABLE ---
+async function loadQueue(tbodySelector="table tbody") {
     try {
         const res = await fetch("/api/ingestion");
         const data = await res.json();
-        const tbody = document.querySelector("table tbody");
+        const tbody = document.querySelector(tbodySelector);
+        if(!tbody) return;
         tbody.innerHTML = "";
 
         data.forEach(entry => {
@@ -150,69 +151,122 @@ async function loadQueue() {
     }
 }
 
-// Incoming Field Data section
-async function loadFieldData() {
+// --- HOTSPOT LIST ---
+async function loadHotspotList(containerSelector) {
     try {
         const res = await fetch("/api/ingestion");
         const data = await res.json();
-        const main = document.querySelector("main");
-        main.innerHTML = `<h2 class="section-title">Incoming Field Data</h2>`;
-        data.forEach(entry => {
-            const div = document.createElement("div");
-            div.classList.add("data-card");
-            div.innerHTML = `
-                <strong>${entry.trap_id}</strong> | ${entry.timestamp} | ${entry.barangay} | ${entry.trap_type} | Eggs: ${entry.egg_count} | Integrity: ${entry.sha256_valid ? 'Valid' : 'Invalid'}
-            `;
-            main.appendChild(div);
+
+        // Aggregate by barangay for risk (egg_count sum)
+        const riskMap = {};
+        data.forEach(d => {
+            if(!riskMap[d.barangay]) riskMap[d.barangay] = 0;
+            riskMap[d.barangay] += d.egg_count;
         });
-    } catch (err) {
-        console.error("Failed to load field data:", err);
+
+        const sortedBarangays = Object.entries(riskMap)
+            .sort((a,b) => b[1] - a[1]);
+
+        const container = document.querySelector(containerSelector);
+        container.innerHTML = "";
+
+        if(sortedBarangays.length === 0){
+            container.innerHTML = "<p style='color:var(--text-muted)'>No hotspot data available.</p>";
+            return;
+        }
+
+        const ul = document.createElement("ul");
+        ul.style.listStyle = "none";
+        ul.style.padding = "0";
+        ul.style.margin = "0";
+        sortedBarangays.forEach(([barangay, totalEggs]) => {
+            const li = document.createElement("li");
+            li.style.padding = "8px 0";
+            li.innerHTML = `<strong>${barangay}</strong>: ${totalEggs} eggs`;
+            ul.appendChild(li);
+        });
+        container.appendChild(ul);
+    } catch(e) {
+        console.error("Failed to load hotspots:", e);
     }
 }
 
-// Hotspot Analytics section (mock example)
-async function loadHotspots() {
-    try {
-        // Replace with real API endpoint if available
-        const res = await fetch("/api/ingestion");
-        const data = await res.json();
-        const main = document.querySelector("main");
-        main.innerHTML = `<h2 class="section-title">Hotspot Analytics</h2>`;
-        const hotspotMap = {};
+// --- SIDEBAR NAVIGATION ---
+const navLinks = document.querySelectorAll("nav .nav-link");
+const main = document.querySelector("main");
 
-        data.forEach(entry => {
-            if (!hotspotMap[entry.barangay]) hotspotMap[entry.barangay] = 0;
-            hotspotMap[entry.barangay] += entry.egg_count;
-        });
-
-        Object.keys(hotspotMap).forEach(barangay => {
-            const div = document.createElement("div");
-            div.classList.add("data-card");
-            div.innerHTML = `${barangay}: Total Eggs: ${hotspotMap[barangay]} | Risk: ${hotspotMap[barangay] > 10 ? 'High' : 'Normal'}`;
-            main.appendChild(div);
-        });
-    } catch (err) {
-        console.error("Failed to load hotspots:", err);
-    }
-}
-
-// NAV LINK HANDLER
-const sections = {
-    "Intelligence Dashboard": loadQueue,
-    "Incoming Field Data": loadFieldData,
-    "Hotspot Analytics": loadHotspots
-};
-
-document.querySelectorAll("nav .nav-link").forEach(link => {
+navLinks.forEach(link => {
     link.addEventListener("click", () => {
-        document.querySelectorAll("nav .nav-link").forEach(l => l.classList.remove("active"));
+        navLinks.forEach(l => l.classList.remove("active"));
         link.classList.add("active");
-        const section = link.textContent.trim();
-        if (sections[section]) sections[section]();
+        const text = link.textContent.trim();
+
+        if(text === "Intelligence Dashboard") {
+            main.innerHTML = `
+                <div class="section-header">
+                    <h2 class="section-title">Live Ingestion Queue</h2>
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">Uplink: Active | Sync Latency: 12ms</span>
+                </div>
+                <div class="data-card">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Source ID</th>
+                                <th>Timestamp</th>
+                                <th>Barangay</th>
+                                <th>Egg Count</th>
+                                <th>Risk Status</th>
+                                <th>Integrity</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            `;
+            loadQueue();
+            setInterval(() => loadQueue(), 5000);
+        }
+
+        if(text === "Incoming Field Data") {
+            main.innerHTML = `
+                <div class="section-header">
+                    <h2 class="section-title">Incoming Field Data</h2>
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">Data from field traps</span>
+                </div>
+                <div class="data-card">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Trap ID</th>
+                                <th>Timestamp</th>
+                                <th>Barangay</th>
+                                <th>Egg Count</th>
+                                <th>Risk Status</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            `;
+            loadQueue("main .data-card tbody");
+        }
+
+        if(text === "Hotspot Analytics") {
+            main.innerHTML = `
+                <div class="section-header">
+                    <h2 class="section-title">Hotspot Analytics</h2>
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">High-risk areas overview</span>
+                </div>
+                <div class="data-card" id="hotspot-container" style="padding:20px;">
+                    <p style="font-size:0.9rem; color:var(--text-muted);">Loading hotspot data...</p>
+                </div>
+            `;
+            loadHotspotList("#hotspot-container");
+        }
     });
 });
 
-// Initial load
+// --- INITIAL LOAD ---
 loadQueue();
 setInterval(loadQueue, 5000);
 </script>
