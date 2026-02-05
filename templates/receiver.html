@@ -117,5 +117,45 @@ aside { background: var(--sidebar-bg); border-left: 1px solid var(--border); pad
         <span style="font-size: 0.75rem; color: var(--hazard-red); font-weight: 700;">THRESHOLD EXCEEDED</span>
     </div>
     <div>
-        <button class="btn btn-primary" onclick="triggerEscal
+        <button class="btn btn-primary" onclick="triggerEscal()">Trigger Escalation</button>
+    </div>
+</aside>
 
+<!-- LIVE TABLE JS -->
+<script>
+async function loadQueue() {
+    try {
+        const res = await fetch("/api/ingestion");
+        const data = await res.json();
+        const tbody = document.querySelector("table tbody");
+        tbody.innerHTML = "";
+
+        data.forEach(entry => {
+            const row = document.createElement("tr");
+
+            // Risk status logic
+            let riskClass = entry.egg_count > 10 ? "status-red" : "status-green";
+            let riskText = entry.egg_count > 10 ? "High" : "Normal";
+
+            row.innerHTML = `
+                <td>${entry.trap_id}</td>
+                <td>${entry.timestamp}</td>
+                <td>${entry.barangay}</td>
+                <td>${entry.egg_count}</td>
+                <td><span class="status-pill ${riskClass}">${riskText}</span></td>
+                <td><span class="status-pill ${entry.sha256_valid ? 'status-green' : 'status-red'}">${entry.sha256_valid ? 'Valid' : 'Invalid'}</span></td>
+            `;
+            tbody.appendChild(row);
+        });
+    } catch (err) {
+        console.error("Failed to load queue:", err);
+    }
+}
+
+// Initial load and auto-refresh every 5 seconds
+loadQueue();
+setInterval(loadQueue, 5000);
+</script>
+
+</body>
+</html>
