@@ -1,140 +1,188 @@
 from flask import Flask, request, jsonify, render_template
-import sqlite3
-import hashlib
-import hmac
+import csv, os, hashlib, hmac
 from datetime import datetime
-import os
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 app = Flask(__name__)
+CSV_FILE = "receiver_data.csv"
 
-DB_FILE = "receiver_data.db"
-SECRET_KEY = b"eot2026et67567"
+# --- Shared secret key (must match scanner) ---
+SECRET_KEY = b"eot2026et67567"  # <-- Change this if you want
+
+# --- Gmail Configuration ---
+GMAIL_USER = "mikec.pascua@gmail.com"  # <-- Replace with your Gmail
+GMAIL_APP_PASSWORD = "qait jrro zucm xiww"  # <-- Use App Password, not normal password
+
+# --- LGU boundaries for GPS-based routing ---
+# Each LGU has a bounding box and an official email
+LGU_BOUNDARIES = [
+    {
+        "name": "Luna",
+        "lat_min": 14.6,
+        "lat_max": 14.65,
+        "lng_min": 121.0,
+        "lng_max": 121.05,
+        "email": "luna_lgu@gmail.com",
+    },
+    {
+        "name": "Cauayan City",
+        "lat_min": 15.2,
+        "lat_max": 15.25,
+        "lng_min": 121.1,
+        "lng_max": 121.15,
+        "email": "cauayan_lgu@gmail.com",
+    },
+    # Add more LGUs here
+]
+
+# --- Threshold for escalation ---
+RISK_THRESHOLD = 50  # Only send email if egg_count exceeds this
 
 
-# -----------------------------
-# DATABASE INIT
-# -----------------------------
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    cur = conn.cursor()
+# --- Helper to get LGU email by GPS ---
+def get_lgu_email_by_gps(lat, lng):
+    for lgu in LGU_BOUNDARIES:
+        if (
+            lgu["lat_min"] <= lat <= lgu["lat_max"]
+            and lgu["lng_min"] <= lng <= lgu["lng_max"]
+        ):
+            return lgu["email"]
+    return GMAIL_USER  # fallback
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS ingestion (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT NOT NULL,
-            trap_id TEXT NOT NULL,
-            trap_type TEXT NOT NULL,
-            gps TEXT NOT NULL,
-            egg_count INTEGER NOT NULL,
-            barangay TEXT,
-            sha256_valid INTEGER NOT NULL
+
+# --- Ensure CSV exists ---
+if not os.path.exists(CSV_FILE):
+    with open(CSV_FILE, "w", newline="") as f:
+        csv.writer(f).writerow(
+            [
+                "timestamp",
+                "trap_id",
+                "trap_type",
+                "gps",
+                "egg_count",
+                "barangay",
+                "sha256_valid",
+            ]
         )
-    """)
-
-    conn.commit()
-    conn.close()
 
 
-init_db()
-
-
-# -----------------------------
-# FRONTEND
-# -----------------------------
+# --- Serve Dashboard ---
 @app.route("/")
 def index():
     return render_template("receiver.html")
 
 
-# -----------------------------
-# SUBMISSION ENDPOINT
-# -----------------------------
+# --- Scanner Submission Endpoint ---
 @app.route("/api/submit", methods=["POST"])
 def submit_data():
     try:
-        data = request.get_json(force=True)
-
-        trap_id = data.get("trap_id", "").strip()
-        trap_type = data.get("trap_type", "").strip()
-        gps = data.get("gps", "").strip()  # expects "lat,long"
+        data = request.json
+        trap_id = data.get("trap_id")
+        trap_type = data.get("trap_type")
+        gps = data.get("gps")
         egg_count = int(data.get("egg_count", 0))
-        barangay = data.get("barangay", "").strip()
-        client_hash = data.get("sha256", "").strip()
+        barangay = data.get("barangay", "")
 
-        if not trap_id or not trap_type or not gps:
-            return jsonify({"success": False, "error": "trap_id, trap_type, and gps are required"}), 400
-
-        # HMAC validation
+        # --- Compute HMAC-SHA256 for verification ---
         payload_str = f"{trap_id}{trap_type}{gps}{egg_count}".encode()
-        server_hash = hmac.new(SECRET_KEY, payload_str, hashlib.sha256).hexdigest()
-        valid = (server_hash == client_hash)
+        sha256_hash = hmac.new(SECRET_KEY, payload_str, hashlib.sha256).hexdigest()
+        valid = sha256_hash == data.get("sha256")
 
-        # Insert into DB
-        conn = sqlite3.connect(DB_FILE)
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO ingestion (timestamp, trap_id, trap_type, gps, egg_count, barangay, sha256_valid)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            datetime.utcnow().isoformat(),
-            trap_id,
-            trap_type,
-            gps,
-            egg_count,
-            barangay,
-            1 if valid else 0
-        ))
-        conn.commit()
-        conn.close()
+        # --- Save to CSV ---
+        with open(CSV_FILE, "a", newline="") as f:
+            csv.writer(f).writerow(
+                [datetime.utcnow(), trap_id, trap_type, gps, egg_count, barangay, valid]
+            )
 
         return jsonify({"success": True, "sha256_valid": valid})
 
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 400
+        return jsonify({"error": str(e)}), 400
 
 
-# -----------------------------
-# FETCH DATA FOR DASHBOARD
-# -----------------------------
+# --- Provide Dashboard Data ---
 @app.route("/api/ingestion")
 def get_ingestion_data():
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT timestamp, trap_id, trap_type, gps, egg_count, barangay, sha256_valid
-        FROM ingestion
-        ORDER BY id DESC
-        LIMIT 200
-    """)
-
-    rows = cur.fetchall()
-    conn.close()
-
     entries = []
-    for r in rows:
-        entries.append({
-            "timestamp": r["timestamp"],
-            "trap_id": r["trap_id"],
-            "trap_type": r["trap_type"],
-            "gps": r["gps"],
-            "egg_count": r["egg_count"],
-            "barangay": r["barangay"] or "",
-            "sha256_valid": bool(r["sha256_valid"]),
-        })
-
+    if os.path.exists(CSV_FILE):
+        with open(CSV_FILE, newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                entries.append(
+                    {
+                        "timestamp": row["timestamp"],
+                        "trap_id": row["trap_id"],
+                        "trap_type": row["trap_type"],
+                        "gps": row["gps"],
+                        "egg_count": int(row["egg_count"]),
+                        "barangay": row.get("barangay", ""),
+                        "sha256_valid": row["sha256_valid"] == "True",
+                    }
+                )
     return jsonify(entries)
 
 
-# -----------------------------
-# HEALTH CHECK
-# -----------------------------
-@app.route("/api/health")
-def health():
-    return jsonify({"status": "ok"})
+# --- Escalation Endpoint using GPS ---
+@app.route("/api/escalate", methods=["POST"])
+def escalate():
+    try:
+        if not os.path.exists(CSV_FILE):
+            return jsonify({"error": "No data available"}), 400
+
+        # Load all records
+        with open(CSV_FILE, newline="") as f:
+            reader = list(csv.DictReader(f))
+            if not reader:
+                return jsonify({"error": "No records to escalate"}), 400
+
+            # Pick record with highest egg count
+            highest = max(reader, key=lambda x: int(x["egg_count"]))
+            trap_id = highest.get("trap_id")
+            gps = highest.get("gps")
+            egg_count = int(highest.get("egg_count"))
+
+        # --- Skip escalation if below threshold ---
+        if egg_count <= RISK_THRESHOLD:
+            return jsonify(
+                {"success": True, "message": "No escalation: egg count below threshold"}
+            )
+
+        # --- Extract latitude and longitude from GPS ---
+        lat, lng = map(float, gps.split(","))
+
+        # --- Determine LGU email based on GPS ---
+        recipient = get_lgu_email_by_gps(lat, lng)
+
+        # Compose email
+        msg = MIMEMultipart()
+        msg["From"] = GMAIL_USER
+        msg["To"] = recipient
+        msg["Subject"] = f"Escalation Alert: High Risk Trap {trap_id}"
+
+        body = f"""
+Escalation Alert
+
+Trap ID: {trap_id}
+GPS: {gps}
+Egg Count: {egg_count}
+
+Please take immediate action.
+"""
+        msg.attach(MIMEText(body, "plain"))
+
+        # Send email via Gmail SMTP
+        server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+        server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+
+        return jsonify({"success": True, "message": f"Escalation sent to {recipient}"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}, 500)
 
 
 if __name__ == "__main__":
-    # debug=False for production
     app.run(host="0.0.0.0", port=5000, debug=True)
