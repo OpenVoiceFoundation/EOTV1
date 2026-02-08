@@ -9,6 +9,9 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
+<!-- CHART.JS (FOR LGU GRAPH) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <style>
 :root {
     --bg-main: #f8f9fa;
@@ -107,6 +110,9 @@ aside { background: var(--sidebar-bg); border-left: 1px solid var(--border); pad
 let refreshInterval = null;
 let hotspotMap = null;
 let hotspotMarkers = [];
+
+/* LGU HUB GRAPH VARIABLE */
+let barangayChart = null;
 
 function stopAutoRefresh(){
     if(refreshInterval){
@@ -265,6 +271,145 @@ async function loadHotspotMapAndList(){
     }
 }
 
+/* ==========================================================
+   LGU REPORTING HUB (ADDED ONLY)
+   ========================================================== */
+
+// Load all records into LGU table
+async function loadLGURecords(tbodySelector="table tbody", threshold=10){
+    try {
+        const res = await fetch("/api/ingestion");
+        if(!res.ok) throw new Error("Failed to fetch ingestion");
+
+        const data = await res.json();
+        const tbody = document.querySelector(tbodySelector);
+        if(!tbody) return;
+
+        tbody.innerHTML = "";
+
+        data.forEach(entry => {
+            const row = document.createElement("tr");
+
+            let riskClass = entry.egg_count > threshold ? "status-red" : "status-green";
+            let riskText = entry.egg_count > threshold ? "Escalate" : "Normal";
+
+            row.innerHTML = `
+                <td>${entry.timestamp}</td>
+                <td>${entry.trap_id}</td>
+                <td>${entry.trap_type}</td>
+                <td>${entry.barangay || ""}</td>
+                <td>${entry.gps}</td>
+                <td>${entry.egg_count}</td>
+                <td><span class="status-pill ${riskClass}">${riskText}</span></td>
+            `;
+
+            tbody.appendChild(row);
+        });
+
+    } catch(err){
+        console.error("LGU records load error:", err);
+    }
+}
+
+// Load threshold exceed counts per barangay into bar chart
+async function loadBarangayThresholdChart(threshold=10){
+    try {
+        const res = await fetch("/api/ingestion");
+        if(!res.ok) throw new Error("Failed to fetch ingestion");
+
+        const data = await res.json();
+
+        const counts = {};
+
+        data.forEach(entry => {
+            if(!entry.barangay) return;
+
+            if(entry.egg_count > threshold){
+                if(!counts[entry.barangay]) counts[entry.barangay] = 0;
+                counts[entry.barangay]++;
+            }
+        });
+
+        const labels = Object.keys(counts);
+        const values = Object.values(counts);
+
+        const canvas = document.getElementById("barangayChart");
+        if(!canvas) return;
+
+        if(barangayChart) barangayChart.destroy();
+
+        barangayChart = new Chart(canvas, {
+            type: "bar",
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: `Barangay Exceed Count (> ${threshold})`,
+                    data: values,
+                    backgroundColor: values.map(v => v >= 3 ? "#ef4444" : "#2563eb")
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: true }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: { precision: 0 }
+                    }
+                }
+            }
+        });
+
+    } catch(err){
+        console.error("LGU chart load error:", err);
+    }
+}
+
+// LGU Hub Page Renderer
+function renderLGUReportingHub(){
+    const main = document.getElementById("main-content");
+
+    main.innerHTML = `
+        <div class="section-header">
+            <h2 class="section-title">LGU Reporting Hub</h2>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">
+                Automated escalation monitoring and reporting
+            </span>
+        </div>
+
+        <div class="data-card">
+            <h3 style="margin:0 0 12px 0; font-size:0.95rem; color:var(--text-muted); font-weight:600;">
+                Barangay Threshold Exceed Summary
+            </h3>
+            <canvas id="barangayChart" height="120"></canvas>
+        </div>
+
+        <div class="data-card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Trap ID</th>
+                        <th>Trap Type</th>
+                        <th>Barangay</th>
+                        <th>GPS</th>
+                        <th>Egg Count</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    `;
+
+    startAutoRefresh(() => {
+        loadLGURecords("#main-content table tbody", 10);
+        loadBarangayThresholdChart(10);
+    }, 5000);
+}
+
 // ----------------------------
 // PAGE RENDERERS
 // ----------------------------
@@ -315,7 +460,6 @@ function renderIncomingFieldData(){
                         <th>GPS</th>
                         <th>Egg Count</th>
                         <th>Risk Status</th>
-                        <th>Integrity</th>
                     </tr>
                 </thead>
                 <tbody></tbody>
@@ -351,6 +495,33 @@ function renderHotspotAnalytics(){
 }
 
 // ----------------------------
+// Escalation trigger
+// ----------------------------
+async function triggerEscal(){
+    try {
+        const res = await fetch("/api/escalate", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            }
+        });
+
+        const data = await res.json();
+
+        if(res.ok){
+            alert("Escalation Triggered.\n\n" + (data.message || "Message sent."));
+        } else {
+            alert("Escalation Failed.\n\n" + (data.error || "Unknown error"));
+        }
+
+    } catch (err) {
+        console.error("Escalation Error:", err);
+        alert("Escalation Failed.\n\nBackend is not responding or /api/escalate is missing.");
+    }
+}
+
+
+// ----------------------------
 // NAVIGATION
 // ----------------------------
 const navLinks = document.querySelectorAll("nav .nav-link");
@@ -365,6 +536,7 @@ navLinks.forEach(link => {
         if(text === "Intelligence Dashboard") renderDashboard();
         if(text === "Incoming Field Data") renderIncomingFieldData();
         if(text === "Hotspot Analytics") renderHotspotAnalytics();
+        if(text === "LGU Reporting Hub") renderLGUReportingHub();
     });
 });
 
@@ -376,4 +548,3 @@ renderDashboard();
 
 </body>
 </html>
-
